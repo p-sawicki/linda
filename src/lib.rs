@@ -18,14 +18,14 @@ const ERROR_PARSING_TUPLE: &str = "Encountered an error while parsing tuple valu
 const NO_CLOSING_PARENTHESIS: &str = "Tuple needs to end with closing parenthesis (')')!";
 
 impl<'a> Parser<'a> {
-    fn new(s: &String) -> Parser {
+    fn new(s: &'a String) -> Parser<'a> {
         let it = s.chars();
         let curr = None;
 
         Parser { it, curr }
     }
 
-    fn parse(&mut self) -> Result<Tuple, &str> {
+    fn parse(&mut self) -> Result<Tuple, &'static str> {
         self.next();
         if !self.expect('(') {
             return Err(NO_OPENING_PARENTHESIS);
@@ -88,18 +88,16 @@ impl<'a> Parser<'a> {
         self.next();
 
         while let Some(c) = self.curr {
-            match c {
-                '"' => {
-                    if result.ends_with('\\') {
-                        result.pop();
-                    } else {
-                        self.next();
-                        return Some(Value::String(result));
-                    }
+            if c == '"' {
+                if result.ends_with('\\') {
+                    result.pop();
+                } else {
+                    self.next();
+                    return Some(Value::String(result));
                 }
-                other => result.push(other),
             }
 
+            result.push(c);
             self.next();
         }
 
@@ -111,20 +109,26 @@ impl<'a> Parser<'a> {
             Some('"') => self.string(),
             Some(c) if c.is_digit(10) || c == '+' || c == '-' || c == '.' => {
                 let mut sign = 1;
-                if c == '+' {
-                    self.next();
-                } else if c == '-' {
+                if self.expect('-') {
                     sign = -1;
-                    self.next();
+                } else {
+                    self.expect('+');
+                }
+
+                if let Some(c) = self.curr {
+                    if !c.is_digit(10) && c != '.' {
+                        return None;
+                    }
                 }
 
                 let result = sign * self.number() as i32;
-                if matches!(self.curr, Some(c) if c == '.') {
-                    self.next();
+                if self.expect('.') {
                     let mut decimal = self.number() as f64;
-                    decimal /= 10_f64.powf(decimal.log10().ceil());
+                    if decimal != 0.0 {
+                        decimal /= 10_f64.powf(decimal.log10().ceil());
+                    }
 
-                    Some(Value::Float(result as f64 + decimal))
+                    Some(Value::Float(result as f64 + sign as f64 * decimal))
                 } else {
                     Some(Value::Int(result))
                 }
@@ -138,30 +142,68 @@ impl<'a> Parser<'a> {
 mod tests {
     use super::*;
 
+    fn parse_impl(input: &str) -> Result<Vec<Value>, &'static str> {
+        Parser::new(&String::from(input)).parse()
+    }
+
+    fn parse(input: &str) -> Vec<Value> {
+        parse_impl(input).unwrap()
+    }
+
+    fn parse_err(input: &str) -> &str {
+        parse_impl(input).err().unwrap()
+    }
+
     #[test]
     fn test_integer() {
-        let input = String::from("(1)");
-        let mut parser = Parser::new(&input);
-
-        let result = parser.parse().unwrap();
+        let result = parse("(1)");
         assert_eq!(result[0], Value::Int(1));
+
+        let result = parse("(+2)");
+        assert_eq!(result[0], Value::Int(2));
+
+        let result = parse("(-3)");
+        assert_eq!(result[0], Value::Int(-3));
     }
 
     #[test]
     fn test_float() {
-        let input = String::from("(2.5)");
-        let mut parser = Parser::new(&input);
-
-        let result = parser.parse().unwrap();
+        let result = parse("(2.5)");
         assert_eq!(result[0], Value::Float(2.5));
+
+        let result = parse("(+.3)");
+        assert_eq!(result[0], Value::Float(0.3));
+
+        let result = parse("(-4.)");
+        assert_eq!(result[0], Value::Float(-4.0));
     }
 
     #[test]
     fn test_string() {
-        let input = String::from("(\"test\")");
-        let mut parser = Parser::new(&input);
-
-        let result = parser.parse().unwrap();
+        let result = parse("(\"test\")");
         assert_eq!(result[0], Value::String(String::from("test")));
+
+        let result = parse("(\"te\\\"st\")");
+        assert_eq!(result[0], Value::String(String::from("te\"st")));
+    }
+
+    #[test]
+    fn test_multiple() {
+        let result = parse("(+1, -3.14, \"test\", )");
+        assert_eq!(result[0], Value::Int(1));
+        assert_eq!(result[1], Value::Float(-3.14));
+        assert_eq!(result[2], Value::String(String::from("test")));
+    }
+
+    #[test]
+    fn test_err() {
+        let result = parse_err("1");
+        assert_eq!(result, NO_OPENING_PARENTHESIS);
+
+        let result = parse_err("(1");
+        assert_eq!(result, NO_CLOSING_PARENTHESIS);
+
+        let result = parse_err("(+-1)");
+        assert_eq!(result, ERROR_PARSING_TUPLE);
     }
 }
