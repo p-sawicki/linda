@@ -1,4 +1,7 @@
-use std::ops::{Deref, DerefMut};
+use std::{
+    fmt::Debug,
+    ops::{Deref, DerefMut},
+};
 
 pub trait Serializable {
     fn to_bytes(&self) -> Vec<u8>;
@@ -25,7 +28,8 @@ pub enum ComparisonOperator {
     ANY,
 }
 
-pub struct Tuple<T: Serializable>(Vec<T>);
+#[derive(PartialEq, Debug)]
+pub struct Tuple<T>(Vec<T>);
 
 #[derive(Debug, PartialEq)]
 pub struct Request {
@@ -109,11 +113,12 @@ impl Serializable for Value {
             EMPTY_STRING => Some(Value::String(None)),
             INT_SIZE => Some(Value::int(read_le_i32(bytes)?)),
             FLOAT_SIZE => Some(Value::float(read_le_f64(bytes)?)),
-            s => {
-                let (string, rest) = bytes.split_at(s as usize);
+            s if (s as usize) <= bytes.len() => {
+                let (string, rest) = bytes.split_at(s as usize); // Could be switched to split_at_unchecked() once it comes to stable Rust.
                 *bytes = rest;
                 Some(Value::string(String::from_utf8(string.to_vec()).ok()?))
             }
+            _ => None,
         }
     }
 }
@@ -147,13 +152,13 @@ impl Serializable for ComparisonOperator {
     }
 }
 
-impl<T: Serializable> Tuple<T> {
+impl<T> Tuple<T> {
     pub fn new() -> Tuple<T> {
         Tuple(Vec::new())
     }
 }
 
-impl<T: Serializable> Deref for Tuple<T> {
+impl<T> Deref for Tuple<T> {
     type Target = Vec<T>;
 
     fn deref(&self) -> &Self::Target {
@@ -161,9 +166,29 @@ impl<T: Serializable> Deref for Tuple<T> {
     }
 }
 
-impl<T: Serializable> DerefMut for Tuple<T> {
+impl<T> DerefMut for Tuple<T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.0
+    }
+}
+
+impl<T: Serializable> Serializable for Tuple<T> {
+    fn to_bytes(&self) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        for value in &self.0 {
+            bytes.append(&mut value.to_bytes());
+        }
+
+        bytes
+    }
+
+    fn from_bytes(bytes: &mut &[u8]) -> Option<Tuple<T>> {
+        let mut elements = Vec::new();
+        while !bytes.is_empty() {
+            elements.push(T::from_bytes(bytes)?);
+        }
+
+        Some(Tuple(elements))
     }
 }
 
@@ -219,6 +244,13 @@ mod tests {
         );
     }
 
+    fn check_tuple<T: Serializable + Debug + PartialEq>(tuple: Tuple<T>) {
+        assert_eq!(
+            tuple,
+            Tuple::from_bytes(&mut &tuple.to_bytes()[..]).unwrap()
+        );
+    }
+
     #[test]
     fn serialize_value() {
         check_value(Value::int(1));
@@ -232,14 +264,34 @@ mod tests {
 
     #[test]
     fn serialize_request() {
-        check_request(Request::new(Value::int(1), ComparisonOperator::ANY));
+        check_request(Request::new(Value::Int(None), ComparisonOperator::ANY));
         check_request(Request::new(Value::float(3.14), ComparisonOperator::EQ));
         check_request(Request::new(
             Value::string(String::new()),
             ComparisonOperator::NEQ,
         ));
-        check_request(Request::new(Value::Int(None), ComparisonOperator::LT));
-        check_request(Request::new(Value::Float(None), ComparisonOperator::GT));
-        check_request(Request::new(Value::String(None), ComparisonOperator::LE));
+        check_request(Request::new(Value::int(1), ComparisonOperator::LT));
+        check_request(Request::new(Value::float(3.14), ComparisonOperator::GT));
+        check_request(Request::new(
+            Value::string(String::from("test")),
+            ComparisonOperator::LE,
+        ));
+    }
+
+    #[test]
+    fn serialize_tuple() {
+        check_tuple(Tuple(vec![
+            Value::int(1),
+            Value::string(String::new()),
+            Value::string(String::from("test")),
+            Value::Int(None),
+            Value::String(None),
+        ]));
+
+        check_tuple(Tuple(vec![
+            Request::new(Value::float(3.14), ComparisonOperator::GE),
+            Request::new(Value::Float(None), ComparisonOperator::ANY),
+            Request::new(Value::String(None), ComparisonOperator::ANY),
+        ]))
     }
 }
