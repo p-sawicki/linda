@@ -14,7 +14,7 @@ pub enum Value {
     String(Option<String>),
 }
 
-#[derive(PartialEq, Debug)]
+#[derive(PartialEq, Debug, Clone, Copy)]
 pub enum ComparisonOperator {
     EQ,
     NEQ,
@@ -109,9 +109,39 @@ impl Serializable for Value {
             EMPTY_STRING => Some(Value::String(None)),
             INT_SIZE => Some(Value::int(read_le_i32(bytes)?)),
             FLOAT_SIZE => Some(Value::float(read_le_f64(bytes)?)),
-            s if bytes.len() as i32 == s => {
-                Some(Value::string(String::from_utf8(bytes.to_vec()).ok()?))
+            s => {
+                let (string, rest) = bytes.split_at(s as usize);
+                *bytes = rest;
+                Some(Value::string(String::from_utf8(string.to_vec()).ok()?))
             }
+        }
+    }
+}
+
+impl Serializable for ComparisonOperator {
+    fn to_bytes(&self) -> Vec<u8> {
+        let value = match self {
+            Self::EQ => 0i32,
+            Self::NEQ => 1,
+            Self::GE => 2,
+            Self::GT => 3,
+            Self::LE => 4,
+            Self::LT => 5,
+            Self::ANY => 6,
+        };
+
+        value.to_le_bytes().to_vec()
+    }
+
+    fn from_bytes(bytes: &mut &[u8]) -> Option<ComparisonOperator> {
+        match read_le_i32(bytes)? {
+            0 => Some(Self::EQ),
+            1 => Some(Self::NEQ),
+            2 => Some(Self::GE),
+            3 => Some(Self::GT),
+            4 => Some(Self::LE),
+            5 => Some(Self::LT),
+            6 => Some(Self::ANY),
             _ => None,
         }
     }
@@ -145,11 +175,17 @@ impl Request {
 
 impl Serializable for Request {
     fn to_bytes(&self) -> Vec<u8> {
-        Vec::new()
+        let mut bytes = self.value.to_bytes();
+        bytes.append(&mut self.op.to_bytes());
+
+        bytes
     }
 
     fn from_bytes(bytes: &mut &[u8]) -> Option<Request> {
-        None
+        let value = Value::from_bytes(bytes)?;
+        let op = ComparisonOperator::from_bytes(bytes)?;
+
+        Some(Request { value, op })
     }
 }
 
@@ -176,6 +212,13 @@ mod tests {
         );
     }
 
+    fn check_request(request: Request) {
+        assert_eq!(
+            request,
+            Request::from_bytes(&mut &request.to_bytes()[..]).unwrap()
+        );
+    }
+
     #[test]
     fn serialize_value() {
         check_value(Value::int(1));
@@ -185,5 +228,18 @@ mod tests {
         check_value(Value::Int(None));
         check_value(Value::Float(None));
         check_value(Value::String(None));
+    }
+
+    #[test]
+    fn serialize_request() {
+        check_request(Request::new(Value::int(1), ComparisonOperator::ANY));
+        check_request(Request::new(Value::float(3.14), ComparisonOperator::EQ));
+        check_request(Request::new(
+            Value::string(String::new()),
+            ComparisonOperator::NEQ,
+        ));
+        check_request(Request::new(Value::Int(None), ComparisonOperator::LT));
+        check_request(Request::new(Value::Float(None), ComparisonOperator::GT));
+        check_request(Request::new(Value::String(None), ComparisonOperator::LE));
     }
 }
