@@ -1,3 +1,12 @@
+use std::ops::{Deref, DerefMut};
+
+pub trait Serializable {
+    fn to_bytes(&self) -> Vec<u8>;
+    fn from_bytes(bytes: &mut &[u8]) -> Option<Self>
+    where
+        Self: Sized;
+}
+
 #[derive(PartialEq, Debug)]
 pub enum Value {
     Int(Option<i32>),
@@ -16,14 +25,19 @@ pub enum ComparisonOperator {
     ANY,
 }
 
-pub type Tuple = Vec<Value>;
-pub type TupleRequest = Vec<Request>;
+pub struct Tuple<T: Serializable>(Vec<T>);
 
 #[derive(Debug, PartialEq)]
 pub struct Request {
     value: Value,
     op: ComparisonOperator,
 }
+
+const INT_SIZE: i32 = -1;
+const FLOAT_SIZE: i32 = -2;
+const EMPTY_INT: i32 = -3;
+const EMPTY_FLOAT: i32 = -4;
+const EMPTY_STRING: i32 = -5;
 
 impl Value {
     pub fn int(i: i32) -> Value {
@@ -57,8 +71,119 @@ impl Value {
     }
 }
 
+impl Serializable for Value {
+    fn to_bytes(&self) -> Vec<u8> {
+        let mut result = Vec::new();
+        match self {
+            Value::Int(opt) => match opt {
+                Some(i) => {
+                    result.append(&mut INT_SIZE.to_le_bytes().to_vec());
+                    result.append(&mut i.to_le_bytes().to_vec());
+                }
+                None => result.append(&mut EMPTY_INT.to_le_bytes().to_vec()),
+            },
+            Value::Float(opt) => match opt {
+                Some(f) => {
+                    result.append(&mut FLOAT_SIZE.to_le_bytes().to_vec());
+                    result.append(&mut f.to_le_bytes().to_vec());
+                }
+                None => result.append(&mut EMPTY_FLOAT.to_le_bytes().to_vec()),
+            },
+            Value::String(opt) => match opt {
+                Some(s) => {
+                    result.append(&mut (s.as_bytes().len() as i32).to_le_bytes().to_vec());
+                    result.append(&mut s.as_bytes().to_vec());
+                }
+                None => result.append(&mut EMPTY_STRING.to_le_bytes().to_vec()),
+            },
+        }
+
+        result
+    }
+
+    fn from_bytes(bytes: &mut &[u8]) -> Option<Value> {
+        let size = read_le_i32(bytes)?;
+        match size {
+            EMPTY_INT => Some(Value::Int(None)),
+            EMPTY_FLOAT => Some(Value::Float(None)),
+            EMPTY_STRING => Some(Value::String(None)),
+            INT_SIZE => Some(Value::int(read_le_i32(bytes)?)),
+            FLOAT_SIZE => Some(Value::float(read_le_f64(bytes)?)),
+            s if bytes.len() as i32 == s => {
+                Some(Value::string(String::from_utf8(bytes.to_vec()).ok()?))
+            }
+            _ => None,
+        }
+    }
+}
+
+impl<T: Serializable> Tuple<T> {
+    pub fn new() -> Tuple<T> {
+        Tuple(Vec::new())
+    }
+}
+
+impl<T: Serializable> Deref for Tuple<T> {
+    type Target = Vec<T>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl<T: Serializable> DerefMut for Tuple<T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
 impl Request {
     pub fn new(value: Value, op: ComparisonOperator) -> Request {
         Request { value, op }
+    }
+}
+
+impl Serializable for Request {
+    fn to_bytes(&self) -> Vec<u8> {
+        Vec::new()
+    }
+
+    fn from_bytes(bytes: &mut &[u8]) -> Option<Request> {
+        None
+    }
+}
+
+fn read_le_i32(input: &mut &[u8]) -> Option<i32> {
+    let (int_bytes, rest) = input.split_at(std::mem::size_of::<i32>());
+    *input = rest;
+    Some(i32::from_le_bytes(int_bytes.try_into().ok()?))
+}
+
+fn read_le_f64(input: &mut &[u8]) -> Option<f64> {
+    let (float_bytes, rest) = input.split_at(std::mem::size_of::<f64>());
+    *input = rest;
+    Some(f64::from_le_bytes(float_bytes.try_into().ok()?))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn check_value(value: Value) {
+        assert_eq!(
+            value,
+            Value::from_bytes(&mut &value.to_bytes()[..]).unwrap()
+        );
+    }
+
+    #[test]
+    fn serialize_value() {
+        check_value(Value::int(1));
+        check_value(Value::float(3.14));
+        check_value(Value::string(String::new()));
+        check_value(Value::string(String::from("test")));
+        check_value(Value::Int(None));
+        check_value(Value::Float(None));
+        check_value(Value::String(None));
     }
 }

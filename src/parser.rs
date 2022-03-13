@@ -19,13 +19,13 @@ impl<'a> Parser<'a> {
         Parser { it, curr }
     }
 
-    fn parse(&mut self) -> Result<Tuple, &'static str> {
+    fn parse(&mut self) -> Result<Tuple<Value>, &'static str> {
         self.next();
         if !self.check('(') {
             return Err(NO_OPENING_PARENTHESIS);
         }
 
-        let mut values = Vec::new();
+        let mut values = Tuple::new();
         while let Some(_) = self.curr {
             if self.check(')') {
                 return Ok(values);
@@ -42,13 +42,13 @@ impl<'a> Parser<'a> {
         Err(NO_CLOSING_PARENTHESIS)
     }
 
-    fn parse_request(&mut self) -> Result<TupleRequest, &'static str> {
+    fn parse_request(&mut self) -> Result<Tuple<Request>, &'static str> {
         self.next();
         if !self.check('(') {
             return Err(NO_OPENING_PARENTHESIS);
         }
 
-        let mut requests = Vec::new();
+        let mut requests = Tuple::new();
         while let Some(_) = self.curr {
             if self.check(')') {
                 return Ok(requests);
@@ -226,15 +226,15 @@ impl<'a> Parser<'a> {
 mod tests {
     use super::*;
 
-    fn parse_impl(input: &str) -> Result<Vec<Value>, &'static str> {
+    fn parse_impl(input: &str) -> Result<Tuple<Value>, &'static str> {
         Parser::new(&String::from(input)).parse()
     }
 
-    fn request_impl(input: &str) -> Result<Vec<Request>, &'static str> {
+    fn request_impl(input: &str) -> Result<Tuple<Request>, &'static str> {
         Parser::new(&String::from(input)).parse_request()
     }
 
-    fn parse(input: &str) -> Vec<Value> {
+    fn parse(input: &str) -> Tuple<Value> {
         parse_impl(input).unwrap()
     }
 
@@ -242,7 +242,7 @@ mod tests {
         parse_impl(input).err().unwrap()
     }
 
-    fn request(input: &str) -> Vec<Request> {
+    fn request(input: &str) -> Tuple<Request> {
         request_impl(input).unwrap()
     }
 
