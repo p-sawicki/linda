@@ -1,11 +1,4 @@
-use std::{
-    env::args,
-    io::Write,
-    net::{Ipv4Addr, SocketAddr, SocketAddrV4, TcpListener, TcpStream},
-    process::exit,
-};
-
-use linda::SERVER_PORT;
+use std::{env, io, net};
 
 fn main() {
     let num_clients = init();
@@ -13,35 +6,30 @@ fn main() {
     send_connection_info(&clients);
 }
 
-fn error(message: &str) -> ! {
-    eprint!("{}", message);
-    exit(1)
-}
-
 fn init() -> usize {
-    let mut args = args();
+    let mut args = env::args();
     let prog_name = args.next().unwrap();
     match args.next() {
         Some(val) => match val.parse() {
             Ok(val) => val,
             Err(_) => {
-                error(&format!(
+                linda::error(&format!(
                     "Expected positive integer as first argument, got: {}",
                     val
                 ));
             }
         },
-        None => error(&format!("Usage:\n{} $NUMBER_OF_CLIENTS", prog_name)),
+        None => linda::error(&format!("Usage:\n{} $NUMBER_OF_CLIENTS", prog_name)),
     }
 }
 
-fn collect_clients(num: usize) -> Vec<SocketAddr> {
-    let localhost = SocketAddrV4::new(Ipv4Addr::LOCALHOST, linda::SERVER_PORT);
-    let listener = match TcpListener::bind(localhost) {
+fn collect_clients(num: usize) -> Vec<net::SocketAddr> {
+    let localhost = net::SocketAddrV4::new(net::Ipv4Addr::LOCALHOST, linda::SERVER_PORT);
+    let listener = match net::TcpListener::bind(localhost) {
         Ok(val) => val,
-        Err(e) => error(&format!(
-            "Bind to local address 127.0.0.1:{} failed! {}",
-            SERVER_PORT, e
+        Err(e) => linda::error(&format!(
+            "Bind to local address {} failed! {}",
+            localhost, e
         )),
     };
 
@@ -63,7 +51,7 @@ fn collect_clients(num: usize) -> Vec<SocketAddr> {
     clients
 }
 
-fn send_connection_info(clients: &[SocketAddr]) {
+fn send_connection_info(clients: &[net::SocketAddr]) {
     if clients.is_empty() {
         return;
     }
@@ -75,9 +63,9 @@ fn send_connection_info(clients: &[SocketAddr]) {
     }
 
     for addr in clients.iter() {
-        let mut stream = match TcpStream::connect(addr) {
+        let mut stream = match net::TcpStream::connect(addr) {
             Ok(val) => val,
-            Err(e) => error(&format!("Connection to client {} failed - {}!", addr, e)),
+            Err(e) => linda::error(&format!("Connection to client {} failed - {}!", addr, e)),
         };
 
         let prev_buffer = to_bytes(match prev {
@@ -94,22 +82,22 @@ fn send_connection_info(clients: &[SocketAddr]) {
         });
 
         for buffer in [prev_buffer, next_buffer] {
-            if let Err(e) = stream.write(&buffer) {
-                error(&format!("Write to client {} failed - {}!", addr, e));
+            if let Err(e) = io::Write::write(&mut stream, &buffer[..]) {
+                linda::error(&format!("Write to client {} failed - {}!", addr, e));
             }
         }
     }
 }
 
-fn to_bytes(addr: &SocketAddr) -> Vec<u8> {
+fn to_bytes(addr: &net::SocketAddr) -> Vec<u8> {
     let mut buffer = match addr {
-        SocketAddr::V4(addr) => {
-            let mut buffer = 4usize.to_le_bytes().to_vec();
+        net::SocketAddr::V4(addr) => {
+            let mut buffer = 4u8.to_le_bytes().to_vec();
             buffer.append(&mut addr.ip().octets().to_vec());
             buffer
         }
-        SocketAddr::V6(addr) => {
-            let mut buffer = 6usize.to_le_bytes().to_vec();
+        net::SocketAddr::V6(addr) => {
+            let mut buffer = 6u8.to_le_bytes().to_vec();
             buffer.append(&mut addr.ip().octets().to_vec());
             buffer
         }

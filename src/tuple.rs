@@ -1,7 +1,4 @@
-use std::{
-    fmt::Debug,
-    ops::{Deref, DerefMut},
-};
+use std::{fmt, ops};
 
 pub trait Serializable {
     fn to_bytes(&self) -> Vec<u8>;
@@ -158,7 +155,7 @@ impl<T> Tuple<T> {
     }
 }
 
-impl<T> Deref for Tuple<T> {
+impl<T> ops::Deref for Tuple<T> {
     type Target = Vec<T>;
 
     fn deref(&self) -> &Self::Target {
@@ -166,7 +163,7 @@ impl<T> Deref for Tuple<T> {
     }
 }
 
-impl<T> DerefMut for Tuple<T> {
+impl<T> ops::DerefMut for Tuple<T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.0
     }
@@ -244,7 +241,7 @@ mod tests {
         );
     }
 
-    fn check_tuple<T: Serializable + Debug + PartialEq>(tuple: Tuple<T>) {
+    fn check_tuple<T: Serializable + fmt::Debug + PartialEq>(tuple: Tuple<T>) {
         assert_eq!(
             tuple,
             Tuple::from_bytes(&mut &tuple.to_bytes()[..]).unwrap()
