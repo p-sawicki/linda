@@ -2,6 +2,7 @@ use std::{env, io, net};
 
 fn main() {
     let num_clients = init();
+    println!("Starting server for {} clients", num_clients);
     let clients = collect_clients(num_clients);
     send_connection_info(&clients);
 }
@@ -32,6 +33,7 @@ fn collect_clients(num: usize) -> Vec<net::SocketAddr> {
             localhost, e
         )),
     };
+    println!("Listening at {}", listener.local_addr().unwrap());
 
     let mut clients = Vec::new();
     clients.reserve(num);
@@ -41,7 +43,7 @@ fn collect_clients(num: usize) -> Vec<net::SocketAddr> {
         match listener.accept() {
             Ok((_, addr)) => {
                 index += 1;
-                print!("[{}/{}] Adding client {}.", index, num, addr);
+                println!("[{}/{}] Adding client {}.", index, num, addr);
                 clients.push(addr);
             }
             Err(e) => eprint!("Incoming connection failed - skipping client! {}", e),

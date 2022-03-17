@@ -15,10 +15,7 @@ fn init() -> net::SocketAddr {
     let prog_name = args.next().unwrap();
 
     if args.len() < 1 {
-        linda::error(&format!(
-            "Usage:\n{} $SERVER_ADDRESS $CLIENT_PORT",
-            prog_name
-        ));
+        linda::error(&format!("Usage:\n{} $SERVER_ADDRESS", prog_name));
     }
 
     match args.next().unwrap().parse() {
@@ -29,16 +26,25 @@ fn init() -> net::SocketAddr {
 
 fn connect_to_server(server_socket: net::SocketAddr) -> (net::SocketAddr, net::SocketAddr) {
     let client_socket = match net::TcpStream::connect(server_socket) {
-        Ok(stream) => match stream.local_addr() {
-            Ok(addr) => addr,
-            Err(e) => linda::error(&format!("Failed to obtain local address! {}", e)),
-        },
+        Ok(mut stream) => {
+            if let Err(e) = io::Write::write(&mut stream, "hello".as_bytes()) {
+                linda::error(&format!("Failed to send to server! {}", e));
+            }
+            match stream.local_addr() {
+                Ok(addr) => addr,
+                Err(e) => linda::error(&format!("Failed to obtain local address! {}", e)),
+            }
+        }
         Err(e) => linda::error(&format!("Connection to {} failed! {}", server_socket, e)),
     };
+    println!(
+        "Connected from {} to server {}",
+        client_socket, server_socket
+    );
 
     let listener = match net::TcpListener::bind(client_socket) {
         Ok(list) => list,
-        Err(e) => linda::error(&format!("Failed to bind to {}!", client_socket)),
+        Err(e) => linda::error(&format!("Failed to bind to {}! {}", client_socket, e)),
     };
 
     let (mut stream, _) = match listener.accept() {
