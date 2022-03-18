@@ -1,12 +1,14 @@
 use std::str::Chars;
 
 use crate::tuple::*;
+use crate::utils::*;
 
 struct Parser<'a> {
     curr: Option<char>,
     it: Chars<'a>,
 }
 
+const INVALID_COMMAND: &str = "Invalid command given!";
 const NO_OPENING_PARENTHESIS: &str = "Tuple needs to start with opening parenthesis ('(')!";
 const ERROR_PARSING_TUPLE: &str = "Encountered an error while parsing tuple values!";
 const NO_CLOSING_PARENTHESIS: &str = "Tuple needs to end with closing parenthesis (')')!";
@@ -15,12 +17,27 @@ impl<'a> Parser<'a> {
     fn new(s: &'a String) -> Parser<'a> {
         let it = s.chars();
         let curr = None;
+        let mut parser = Parser { it, curr };
+        parser.next();
 
-        Parser { it, curr }
+        parser
     }
 
-    fn parse(&mut self) -> Result<Tuple<Value>, &'static str> {
-        self.next();
+    fn parse(&mut self) -> Result<Command, &'static str> {
+        match &self.word().to_lowercase()[..] {
+            "out" => Ok(Command::Out(self.tuple()?)),
+            "in" => Ok(Command::In(self.request()?, self.number() as Timeout)),
+            "rd" | "read" => Ok(Command::Rd(self.request()?, self.number() as Timeout)),
+            "inp" => Ok(Command::Inp(self.request()?)),
+            "rdp" | "readp" => Ok(Command::Rdp(self.request()?)),
+            "help" => Ok(Command::Help),
+            "exit" => Ok(Command::Exit),
+            _ => Err(INVALID_COMMAND),
+        }
+    }
+
+    fn tuple(&mut self) -> Result<Tuple<Value>, &'static str> {
+        self.skip_ws();
         if !self.check('(') {
             return Err(NO_OPENING_PARENTHESIS);
         }
@@ -42,8 +59,8 @@ impl<'a> Parser<'a> {
         Err(NO_CLOSING_PARENTHESIS)
     }
 
-    fn parse_request(&mut self) -> Result<Tuple<Request>, &'static str> {
-        self.next();
+    fn request(&mut self) -> Result<Tuple<Request>, &'static str> {
+        self.skip_ws();
         if !self.check('(') {
             return Err(NO_OPENING_PARENTHESIS);
         }
@@ -112,6 +129,7 @@ impl<'a> Parser<'a> {
     }
 
     fn number(&mut self) -> u32 {
+        self.skip_ws();
         let mut result = 0;
         while let Some(c) = self.curr {
             if c.is_digit(10) {
@@ -220,6 +238,21 @@ impl<'a> Parser<'a> {
             _ => Some(ComparisonOperator::EQ),
         }
     }
+
+    fn word(&mut self) -> String {
+        self.skip_ws();
+        let mut result = String::new();
+        while let Some(c) = self.curr {
+            if c.is_whitespace() {
+                break;
+            }
+
+            result.push(c);
+            self.next();
+        }
+
+        result
+    }
 }
 
 #[cfg(test)]
@@ -227,11 +260,15 @@ mod tests {
     use super::*;
 
     fn parse_impl(input: &str) -> Result<Tuple<Value>, &'static str> {
-        Parser::new(&String::from(input)).parse()
+        Parser::new(&String::from(input)).tuple()
     }
 
     fn request_impl(input: &str) -> Result<Tuple<Request>, &'static str> {
-        Parser::new(&String::from(input)).parse_request()
+        Parser::new(&String::from(input)).request()
+    }
+
+    fn command_impl(input: &str) -> Result<Command, &'static str> {
+        Parser::new(&String::from(input)).parse()
     }
 
     fn parse(input: &str) -> Tuple<Value> {
@@ -244,6 +281,14 @@ mod tests {
 
     fn request(input: &str) -> Tuple<Request> {
         request_impl(input).unwrap()
+    }
+
+    fn command(input: &str) -> Command {
+        command_impl(input).unwrap()
+    }
+
+    fn command_err(input: &str) -> &str {
+        command_impl(input).err().unwrap()
     }
 
     #[test]
@@ -318,5 +363,62 @@ mod tests {
             ComparisonOperator::LT,
         );
         check_request(&result[6], Value::int(15), ComparisonOperator::GT);
+    }
+
+    fn make_tuple<T>(mut vals: Vec<T>) -> Tuple<T> {
+        let mut result = Tuple::new();
+        result.append(&mut vals);
+        result
+    }
+
+    #[test]
+    fn test_command() {
+        let result = command("out (1)");
+        assert_eq!(result, Command::Out(make_tuple(vec![Value::int(1)])));
+
+        let result = command("in (float: *) 10");
+        assert_eq!(
+            result,
+            Command::In(
+                make_tuple(vec![Request::new(
+                    Value::Float(None),
+                    ComparisonOperator::ANY
+                )]),
+                10 as Timeout
+            )
+        );
+
+        let result = command("rd (string: \"a\") 3");
+        assert_eq!(
+            result,
+            Command::Rd(
+                make_tuple(vec![Request::new(
+                    Value::string(String::from("a")),
+                    ComparisonOperator::EQ
+                )]),
+                3 as Timeout
+            )
+        );
+
+        let result = command("inp (int: <= 5)");
+        assert_eq!(
+            result,
+            Command::Inp(make_tuple(vec![Request::new(
+                Value::int(5),
+                ComparisonOperator::LE
+            )]))
+        );
+
+        let result = command("rdp ()");
+        assert_eq!(result, Command::Rdp(make_tuple(vec![])));
+
+        let result = command("help");
+        assert_eq!(result, Command::Help);
+
+        let result = command("exit");
+        assert_eq!(result, Command::Exit);
+
+        let result = command_err("q");
+        assert_eq!(result, INVALID_COMMAND);
     }
 }

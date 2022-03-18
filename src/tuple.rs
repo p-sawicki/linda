@@ -1,4 +1,4 @@
-use std::{fmt, ops};
+use std::ops;
 
 pub trait Serializable {
     fn to_bytes(&self) -> Vec<u8>;
@@ -225,6 +225,8 @@ fn read_le_f64(input: &mut &[u8]) -> Option<f64> {
 
 #[cfg(test)]
 mod tests {
+    use std::fmt;
+
     use super::*;
 
     fn check_value(value: Value) {
