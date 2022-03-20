@@ -1,4 +1,4 @@
-use std::ops;
+use std::{net, ops};
 
 pub trait Serializable {
     fn to_bytes(&self) -> Vec<u8>;
@@ -32,6 +32,12 @@ pub struct Tuple<T>(Vec<T>);
 pub struct Request {
     value: Value,
     op: ComparisonOperator,
+}
+
+#[derive(Debug, PartialEq)]
+pub struct Message<T> {
+    tuple: Tuple<T>,
+    ip: net::SocketAddr,
 }
 
 const INT_SIZE: i32 = -1;
@@ -103,13 +109,13 @@ impl Serializable for Value {
     }
 
     fn from_bytes(bytes: &mut &[u8]) -> Option<Value> {
-        let size = read_le_i32(bytes)?;
+        let size = crate::utils::read_le_i32(bytes)?;
         match size {
             EMPTY_INT => Some(Value::Int(None)),
             EMPTY_FLOAT => Some(Value::Float(None)),
             EMPTY_STRING => Some(Value::String(None)),
-            INT_SIZE => Some(Value::int(read_le_i32(bytes)?)),
-            FLOAT_SIZE => Some(Value::float(read_le_f64(bytes)?)),
+            INT_SIZE => Some(Value::int(crate::utils::read_le_i32(bytes)?)),
+            FLOAT_SIZE => Some(Value::float(crate::utils::read_le_f64(bytes)?)),
             s if (s as usize) <= bytes.len() => {
                 let (string, rest) = bytes.split_at(s as usize); // Could be switched to split_at_unchecked() once it comes to stable Rust.
                 *bytes = rest;
@@ -136,7 +142,7 @@ impl Serializable for ComparisonOperator {
     }
 
     fn from_bytes(bytes: &mut &[u8]) -> Option<ComparisonOperator> {
-        match read_le_i32(bytes)? {
+        match crate::utils::read_le_i32(bytes)? {
             0 => Some(Self::EQ),
             1 => Some(Self::NEQ),
             2 => Some(Self::GE),
@@ -171,7 +177,7 @@ impl<T> ops::DerefMut for Tuple<T> {
 
 impl<T: Serializable> Serializable for Tuple<T> {
     fn to_bytes(&self) -> Vec<u8> {
-        let mut bytes = Vec::new();
+        let mut bytes = self.0.len().to_le_bytes().to_vec();
         for value in &self.0 {
             bytes.append(&mut value.to_bytes());
         }
@@ -180,8 +186,9 @@ impl<T: Serializable> Serializable for Tuple<T> {
     }
 
     fn from_bytes(bytes: &mut &[u8]) -> Option<Tuple<T>> {
+        let size = crate::utils::read_le_usize(bytes)?;
         let mut elements = Vec::new();
-        while !bytes.is_empty() {
+        for _ in 0..size {
             elements.push(T::from_bytes(bytes)?);
         }
 
@@ -211,21 +218,28 @@ impl Serializable for Request {
     }
 }
 
-fn read_le_i32(input: &mut &[u8]) -> Option<i32> {
-    let (int_bytes, rest) = input.split_at(std::mem::size_of::<i32>());
-    *input = rest;
-    Some(i32::from_le_bytes(int_bytes.try_into().ok()?))
-}
+impl<T: Serializable> Serializable for Message<T> {
+    fn to_bytes(&self) -> Vec<u8> {
+        let mut bytes = self.tuple.to_bytes();
+        bytes.append(&mut crate::utils::ip_to_bytes(&self.ip));
 
-fn read_le_f64(input: &mut &[u8]) -> Option<f64> {
-    let (float_bytes, rest) = input.split_at(std::mem::size_of::<f64>());
-    *input = rest;
-    Some(f64::from_le_bytes(float_bytes.try_into().ok()?))
+        bytes
+    }
+
+    fn from_bytes(bytes: &mut &[u8]) -> Option<Message<T>> {
+        let tuple = Tuple::from_bytes(bytes)?;
+        let ip = crate::utils::bytes_to_ip(bytes)?;
+
+        Some(Message { tuple, ip })
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::fmt;
+    use std::{
+        fmt,
+        net::{Ipv4Addr, Ipv6Addr},
+    };
 
     use super::*;
 
@@ -247,6 +261,13 @@ mod tests {
         assert_eq!(
             tuple,
             Tuple::from_bytes(&mut &tuple.to_bytes()[..]).unwrap()
+        );
+    }
+
+    fn check_message<T: Serializable + fmt::Debug + PartialEq>(message: Message<T>) {
+        assert_eq!(
+            message,
+            Message::from_bytes(&mut &message.to_bytes()[..]).unwrap()
         );
     }
 
@@ -292,5 +313,24 @@ mod tests {
             Request::new(Value::Float(None), ComparisonOperator::ANY),
             Request::new(Value::String(None), ComparisonOperator::ANY),
         ]))
+    }
+
+    #[test]
+    fn serialize_message() {
+        check_message(Message {
+            tuple: Tuple(vec![Request::new(Value::int(420), ComparisonOperator::LE)]),
+            ip: net::SocketAddr::new(
+                net::IpAddr::V4(Ipv4Addr::LOCALHOST),
+                crate::utils::SERVER_PORT,
+            ),
+        });
+
+        check_message(Message {
+            tuple: Tuple::<Value>(vec![]),
+            ip: net::SocketAddr::new(
+                net::IpAddr::V6(Ipv6Addr::LOCALHOST),
+                crate::utils::SERVER_PORT,
+            ),
+        });
     }
 }

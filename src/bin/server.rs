@@ -72,7 +72,7 @@ fn send_connection_info(clients: &[net::SocketAddr]) {
             }
         };
 
-        let prev_buffer = to_bytes(match prev {
+        let prev_buffer = linda::utils::ip_to_bytes(match prev {
             None => {
                 prev = Some(clients.iter());
                 clients.last().unwrap()
@@ -80,7 +80,7 @@ fn send_connection_info(clients: &[net::SocketAddr]) {
             Some(ref mut addr) => addr.next().unwrap(),
         });
 
-        let next_buffer = to_bytes(match next.next() {
+        let next_buffer = linda::utils::ip_to_bytes(match next.next() {
             Some(addr) => addr,
             None => clients.first().unwrap(),
         });
@@ -91,22 +91,4 @@ fn send_connection_info(clients: &[net::SocketAddr]) {
             }
         }
     }
-}
-
-fn to_bytes(addr: &net::SocketAddr) -> Vec<u8> {
-    let mut buffer = match addr {
-        net::SocketAddr::V4(addr) => {
-            let mut buffer = 4u8.to_le_bytes().to_vec();
-            buffer.append(&mut addr.ip().octets().to_vec());
-            buffer
-        }
-        net::SocketAddr::V6(addr) => {
-            let mut buffer = 6u8.to_le_bytes().to_vec();
-            buffer.append(&mut addr.ip().octets().to_vec());
-            buffer
-        }
-    };
-    buffer.append(&mut addr.port().to_le_bytes().to_vec());
-
-    buffer
 }
