@@ -1,4 +1,7 @@
-use std::{net, ops};
+use std::{
+    net::{self},
+    ops,
+};
 
 pub trait Serializable {
     fn to_bytes(&self) -> Vec<u8>;
@@ -36,8 +39,8 @@ pub struct Request {
 
 #[derive(Debug, PartialEq)]
 pub struct Message<T> {
-    tuple: Tuple<T>,
-    ip: net::SocketAddr,
+    pub tuple: Tuple<T>,
+    pub ip: net::SocketAddr,
 }
 
 const INT_SIZE: i32 = -1;
@@ -218,6 +221,12 @@ impl Serializable for Request {
     }
 }
 
+impl<T> Message<T> {
+    pub fn new(tuple: Tuple<T>, ip: net::SocketAddr) -> Message<T> {
+        Message { tuple, ip }
+    }
+}
+
 impl<T: Serializable> Serializable for Message<T> {
     fn to_bytes(&self) -> Vec<u8> {
         let mut bytes = self.tuple.to_bytes();
@@ -236,10 +245,7 @@ impl<T: Serializable> Serializable for Message<T> {
 
 #[cfg(test)]
 mod tests {
-    use std::{
-        fmt,
-        net::{Ipv4Addr, Ipv6Addr},
-    };
+    use std::{fmt, net};
 
     use super::*;
 
@@ -320,7 +326,7 @@ mod tests {
         check_message(Message {
             tuple: Tuple(vec![Request::new(Value::int(420), ComparisonOperator::LE)]),
             ip: net::SocketAddr::new(
-                net::IpAddr::V4(Ipv4Addr::LOCALHOST),
+                net::IpAddr::V4(net::Ipv4Addr::LOCALHOST),
                 crate::utils::SERVER_PORT,
             ),
         });
@@ -328,7 +334,7 @@ mod tests {
         check_message(Message {
             tuple: Tuple::<Value>(vec![]),
             ip: net::SocketAddr::new(
-                net::IpAddr::V6(Ipv6Addr::LOCALHOST),
+                net::IpAddr::V6(net::Ipv6Addr::LOCALHOST),
                 crate::utils::SERVER_PORT,
             ),
         });

@@ -1,4 +1,5 @@
-use std::{env, io, mem, net};
+use linda::{recv_message, tuple::Value, utils::*};
+use std::{env, io, net};
 
 fn main() {
     let server_socket = init();
@@ -15,12 +16,12 @@ fn init() -> net::SocketAddr {
     let prog_name = args.next().unwrap();
 
     if args.len() < 1 {
-        linda::utils::error(&format!("Usage:\n{} $SERVER_ADDRESS", prog_name));
+        error(&format!("Usage:\n{} $SERVER_ADDRESS", prog_name));
     }
 
     match args.next().unwrap().parse() {
-        Ok(addr) => net::SocketAddr::new(addr, linda::utils::SERVER_PORT),
-        Err(e) => linda::utils::error(&format!("Incorrect server address! {}", e)),
+        Ok(addr) => net::SocketAddr::new(addr, SERVER_PORT),
+        Err(e) => error(&format!("Incorrect server address! {}", e)),
     }
 }
 
@@ -28,14 +29,14 @@ fn connect_to_server(server_socket: net::SocketAddr) -> (net::SocketAddr, net::S
     let client_socket = match net::TcpStream::connect(server_socket) {
         Ok(mut stream) => {
             if let Err(e) = io::Write::write(&mut stream, "hello".as_bytes()) {
-                linda::utils::error(&format!("Failed to send to server! {}", e));
+                error(&format!("Failed to send to server! {}", e));
             }
             match stream.local_addr() {
                 Ok(addr) => addr,
-                Err(e) => linda::utils::error(&format!("Failed to obtain local address! {}", e)),
+                Err(e) => error(&format!("Failed to obtain local address! {}", e)),
             }
         }
-        Err(e) => linda::utils::error(&format!("Connection to {} failed! {}", server_socket, e)),
+        Err(e) => error(&format!("Connection to {} failed! {}", server_socket, e)),
     };
     println!(
         "Connected from {} to server {}",
@@ -44,52 +45,20 @@ fn connect_to_server(server_socket: net::SocketAddr) -> (net::SocketAddr, net::S
 
     let listener = match net::TcpListener::bind(client_socket) {
         Ok(list) => list,
-        Err(e) => linda::utils::error(&format!("Failed to bind to {}! {}", client_socket, e)),
+        Err(e) => error(&format!("Failed to bind to {}! {}", client_socket, e)),
     };
 
     let (mut stream, _) = match listener.accept() {
         Ok(res) => res,
-        Err(e) => linda::utils::error(&format!("Failed to accept incoming connection! {}", e)),
+        Err(e) => error(&format!("Failed to accept incoming connection! {}", e)),
     };
 
     (get_socket(&mut stream), get_socket(&mut stream))
 }
 
 fn get_socket(stream: &mut net::TcpStream) -> net::SocketAddr {
-    const IP_ADDR_LENGTH: usize = mem::size_of::<u8>();
-    const IPV4_ADDR_LENGTH: usize = net::Ipv4Addr::LOCALHOST.octets().len();
-    const IPV6_ADDR_LENGTH: usize = net::Ipv6Addr::LOCALHOST.octets().len();
-    const PORT_LENGTH: usize = mem::size_of::<u16>();
-
-    let mut buffer = [0u8; IP_ADDR_LENGTH];
-    let ip_ver = match io::Read::read(stream, &mut buffer) {
-        Ok(len) if len == IP_ADDR_LENGTH => u8::from_le_bytes(buffer),
-        _ => linda::utils::error(&format!("Failed to obtain IP version from server!")),
-    };
-
-    let ip_addr = match ip_ver {
-        4 => {
-            let mut buffer = [0u8; IPV4_ADDR_LENGTH];
-            match io::Read::read(stream, &mut buffer) {
-                Ok(len) if len == IPV4_ADDR_LENGTH => net::IpAddr::V4(net::Ipv4Addr::from(buffer)),
-                _ => linda::utils::error(&format!("Failed to obtain IPv4 address from server!")),
-            }
-        }
-        6 => {
-            let mut buffer = [0u8; IPV6_ADDR_LENGTH];
-            match io::Read::read(stream, &mut buffer) {
-                Ok(len) if len == IPV6_ADDR_LENGTH => net::IpAddr::V6(net::Ipv6Addr::from(buffer)),
-                _ => linda::utils::error(&format!("Failed to obtain IPv6 address from server!")),
-            }
-        }
-        _ => linda::utils::error(&format!("Invalid IP version from server!")),
-    };
-
-    let mut buffer = [0u8; PORT_LENGTH];
-    let port = match io::Read::read(stream, &mut buffer) {
-        Ok(len) if len == PORT_LENGTH => u16::from_le_bytes(buffer),
-        _ => linda::utils::error(&format!("Failed to obtain port from server!")),
-    };
-
-    net::SocketAddr::new(ip_addr, port)
+    match recv_message::<Value>(stream) {
+        Ok(msg) => msg.ip,
+        Err(e) => error(&format!("Failed to obtain socket! {}", e)),
+    }
 }

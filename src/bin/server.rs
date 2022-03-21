@@ -1,4 +1,5 @@
-use std::{env, io, net};
+use linda::{tuple::*, utils::*, *};
+use std::{env, net};
 
 fn main() {
     let num_clients = init();
@@ -14,21 +15,21 @@ fn init() -> usize {
         Some(val) => match val.parse() {
             Ok(val) => val,
             Err(_) => {
-                linda::utils::error(&format!(
+                error(&format!(
                     "Expected positive integer as first argument, got: {}",
                     val
                 ));
             }
         },
-        None => linda::utils::error(&format!("Usage:\n{} $NUMBER_OF_CLIENTS", prog_name)),
+        None => error(&format!("Usage:\n{} $NUMBER_OF_CLIENTS", prog_name)),
     }
 }
 
 fn collect_clients(num: usize) -> Vec<net::SocketAddr> {
-    let localhost = net::SocketAddrV4::new(net::Ipv4Addr::LOCALHOST, linda::utils::SERVER_PORT);
+    let localhost = net::SocketAddrV4::new(net::Ipv4Addr::LOCALHOST, SERVER_PORT);
     let listener = match net::TcpListener::bind(localhost) {
         Ok(val) => val,
-        Err(e) => linda::utils::error(&format!(
+        Err(e) => error(&format!(
             "Bind to local address {} failed! {}",
             localhost, e
         )),
@@ -67,27 +68,27 @@ fn send_connection_info(clients: &[net::SocketAddr]) {
     for addr in clients.iter() {
         let mut stream = match net::TcpStream::connect(addr) {
             Ok(val) => val,
-            Err(e) => {
-                linda::utils::error(&format!("Connection to client {} failed - {}!", addr, e))
-            }
+            Err(e) => error(&format!("Connection to client {} failed - {}!", addr, e)),
         };
 
-        let prev_buffer = linda::utils::ip_to_bytes(match prev {
+        let prev_ip = match prev {
             None => {
                 prev = Some(clients.iter());
                 clients.last().unwrap()
             }
             Some(ref mut addr) => addr.next().unwrap(),
-        });
+        };
+        let prev_msg = Message::new(Tuple::<Value>::new(), prev_ip.clone());
 
-        let next_buffer = linda::utils::ip_to_bytes(match next.next() {
+        let next_ip = match next.next() {
             Some(addr) => addr,
             None => clients.first().unwrap(),
-        });
+        };
+        let next_msg = Message::new(Tuple::<Value>::new(), next_ip.clone());
 
-        for buffer in [prev_buffer, next_buffer] {
-            if let Err(e) = io::Write::write(&mut stream, &buffer[..]) {
-                linda::utils::error(&format!("Write to client {} failed - {}!", addr, e));
+        for msg in [prev_msg, next_msg] {
+            if let Err(e) = send_message(&mut stream, msg) {
+                error(&format!("Write to client {} failed - {}!", addr, e));
             }
         }
     }

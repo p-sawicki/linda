@@ -1,6 +1,7 @@
 use std::{
     mem,
     net::{self, Ipv4Addr, Ipv6Addr},
+    process,
 };
 
 use crate::tuple::{Request, Tuple, Value};
@@ -26,7 +27,7 @@ pub const PORT_LENGTH: usize = mem::size_of::<u16>();
 
 pub fn error(message: &str) -> ! {
     eprint!("{}", message);
-    std::process::exit(1)
+    process::exit(1)
 }
 
 pub fn read_le_u8(input: &mut &[u8]) -> Option<u8> {
