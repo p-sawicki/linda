@@ -1,6 +1,6 @@
 use std::{
     mem,
-    net::{self, Ipv4Addr, Ipv6Addr},
+    net::{self},
     process,
 };
 
@@ -58,44 +58,4 @@ pub fn read_le_usize(input: &mut &[u8]) -> Option<usize> {
     let (usize_bytes, rest) = input.split_at(mem::size_of::<usize>());
     *input = rest;
     Some(usize::from_le_bytes(usize_bytes.try_into().ok()?))
-}
-
-pub fn ip_to_bytes(addr: &net::SocketAddr) -> Vec<u8> {
-    let mut buffer = match addr {
-        net::SocketAddr::V4(addr) => {
-            let mut buffer = 4u8.to_le_bytes().to_vec();
-            buffer.append(&mut addr.ip().octets().to_vec());
-            buffer
-        }
-        net::SocketAddr::V6(addr) => {
-            let mut buffer = 6u8.to_le_bytes().to_vec();
-            buffer.append(&mut addr.ip().octets().to_vec());
-            buffer
-        }
-    };
-    buffer.append(&mut addr.port().to_le_bytes().to_vec());
-
-    buffer
-}
-
-pub fn bytes_to_ip(bytes: &mut &[u8]) -> Option<net::SocketAddr> {
-    let ip_ver = read_le_u8(bytes)?;
-    let addr = match ip_ver {
-        4 => {
-            let (ip_bytes, rest) = bytes.split_at(IPV4_ADDR_LENGTH);
-            *bytes = rest;
-            let buffer: [u8; IPV4_ADDR_LENGTH] = ip_bytes.try_into().ok()?;
-            net::IpAddr::V4(Ipv4Addr::from(buffer))
-        }
-        6 => {
-            let (ip_bytes, rest) = bytes.split_at(IPV6_ADDR_LENGTH);
-            *bytes = rest;
-            let buffer: [u8; IPV6_ADDR_LENGTH] = ip_bytes.try_into().ok()?;
-            net::IpAddr::V6(Ipv6Addr::from(buffer))
-        }
-        _ => return None,
-    };
-    let port = read_le_u16(bytes)?;
-
-    Some(net::SocketAddr::new(addr, port))
 }

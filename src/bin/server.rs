@@ -1,4 +1,4 @@
-use linda::{tuple::*, utils::*, *};
+use linda::{message::Message, tuple::*, utils::*};
 use std::{env, net};
 
 fn main() {
@@ -78,16 +78,16 @@ fn send_connection_info(clients: &[net::SocketAddr]) {
             }
             Some(ref mut addr) => addr.next().unwrap(),
         };
-        let prev_msg = Message::new(Tuple::<Value>::new(), prev_ip.clone());
+        let prev_msg = Message::<Value>::from_ip(prev_ip.clone());
 
         let next_ip = match next.next() {
             Some(addr) => addr,
             None => clients.first().unwrap(),
         };
-        let next_msg = Message::new(Tuple::<Value>::new(), next_ip.clone());
+        let next_msg = Message::<Value>::from_ip(next_ip.clone());
 
         for msg in [prev_msg, next_msg] {
-            if let Err(e) = send_message(&mut stream, msg) {
+            if let Err(e) = msg.send(&mut stream) {
                 error(&format!("Write to client {} failed - {}!", addr, e));
             }
         }

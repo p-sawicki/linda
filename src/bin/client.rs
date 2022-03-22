@@ -1,4 +1,4 @@
-use linda::{recv_message, tuple::Value, utils::*};
+use linda::{message::*, tuple::Value, utils::*};
 use std::{env, io, net};
 
 fn main() {
@@ -57,7 +57,7 @@ fn connect_to_server(server_socket: net::SocketAddr) -> (net::SocketAddr, net::S
 }
 
 fn get_socket(stream: &mut net::TcpStream) -> net::SocketAddr {
-    match recv_message::<Value>(stream) {
+    match Message::<Value>::recv(stream) {
         Ok(msg) => msg.ip,
         Err(e) => error(&format!("Failed to obtain socket! {}", e)),
     }

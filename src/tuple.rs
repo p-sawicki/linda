@@ -37,12 +37,6 @@ pub struct Request {
     op: ComparisonOperator,
 }
 
-#[derive(Debug, PartialEq)]
-pub struct Message<T> {
-    pub tuple: Tuple<T>,
-    pub ip: net::SocketAddr,
-}
-
 const INT_SIZE: i32 = -1;
 const FLOAT_SIZE: i32 = -2;
 const EMPTY_INT: i32 = -3;
@@ -221,28 +215,6 @@ impl Serializable for Request {
     }
 }
 
-impl<T> Message<T> {
-    pub fn new(tuple: Tuple<T>, ip: net::SocketAddr) -> Message<T> {
-        Message { tuple, ip }
-    }
-}
-
-impl<T: Serializable> Serializable for Message<T> {
-    fn to_bytes(&self) -> Vec<u8> {
-        let mut bytes = self.tuple.to_bytes();
-        bytes.append(&mut crate::utils::ip_to_bytes(&self.ip));
-
-        bytes
-    }
-
-    fn from_bytes(bytes: &mut &[u8]) -> Option<Message<T>> {
-        let tuple = Tuple::from_bytes(bytes)?;
-        let ip = crate::utils::bytes_to_ip(bytes)?;
-
-        Some(Message { tuple, ip })
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use std::{fmt, net};
@@ -267,13 +239,6 @@ mod tests {
         assert_eq!(
             tuple,
             Tuple::from_bytes(&mut &tuple.to_bytes()[..]).unwrap()
-        );
-    }
-
-    fn check_message<T: Serializable + fmt::Debug + PartialEq>(message: Message<T>) {
-        assert_eq!(
-            message,
-            Message::from_bytes(&mut &message.to_bytes()[..]).unwrap()
         );
     }
 
@@ -319,24 +284,5 @@ mod tests {
             Request::new(Value::Float(None), ComparisonOperator::ANY),
             Request::new(Value::String(None), ComparisonOperator::ANY),
         ]))
-    }
-
-    #[test]
-    fn serialize_message() {
-        check_message(Message {
-            tuple: Tuple(vec![Request::new(Value::int(420), ComparisonOperator::LE)]),
-            ip: net::SocketAddr::new(
-                net::IpAddr::V4(net::Ipv4Addr::LOCALHOST),
-                crate::utils::SERVER_PORT,
-            ),
-        });
-
-        check_message(Message {
-            tuple: Tuple::<Value>(vec![]),
-            ip: net::SocketAddr::new(
-                net::IpAddr::V6(net::Ipv6Addr::LOCALHOST),
-                crate::utils::SERVER_PORT,
-            ),
-        });
     }
 }
