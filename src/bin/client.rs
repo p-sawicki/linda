@@ -1,5 +1,9 @@
 use linda::{message::*, tuple::Value, utils::*};
-use std::{env, io, net};
+use std::{
+    env,
+    io::Write,
+    net::{self},
+};
 
 fn main() {
     let server_socket = init();
@@ -26,9 +30,19 @@ fn init() -> net::SocketAddr {
 }
 
 fn connect_to_server(server_socket: net::SocketAddr) -> (net::SocketAddr, net::SocketAddr) {
+    let listener = match net::TcpListener::bind("127.0.0.1:0") {
+        Ok(list) => list,
+        Err(e) => error(&format!("Failed to bind! {}", e)),
+    };
+    let port = match listener.local_addr() {
+        Ok(addr) => addr.port(),
+        Err(e) => error(&format!("Failed to receive local address! {}", e)),
+    };
+    println!("Client listening on port {}", port);
+
     let client_socket = match net::TcpStream::connect(server_socket) {
         Ok(mut stream) => {
-            if let Err(e) = io::Write::write(&mut stream, "hello".as_bytes()) {
+            if let Err(e) = stream.write(&port.to_le_bytes()) {
                 error(&format!("Failed to send to server! {}", e));
             }
             match stream.local_addr() {
@@ -42,11 +56,6 @@ fn connect_to_server(server_socket: net::SocketAddr) -> (net::SocketAddr, net::S
         "Connected from {} to server {}",
         client_socket, server_socket
     );
-
-    let listener = match net::TcpListener::bind(client_socket) {
-        Ok(list) => list,
-        Err(e) => error(&format!("Failed to bind to {}! {}", client_socket, e)),
-    };
 
     let (mut stream, _) = match listener.accept() {
         Ok(res) => res,

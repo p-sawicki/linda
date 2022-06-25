@@ -1,5 +1,9 @@
 use linda::{message::Message, tuple::*, utils::*};
-use std::{env, net};
+use std::{
+    env,
+    io::Read,
+    net::{self},
+};
 
 fn main() {
     let num_clients = init();
@@ -42,12 +46,30 @@ fn collect_clients(num: usize) -> Vec<net::SocketAddr> {
 
     while index < num {
         match listener.accept() {
-            Ok((_, addr)) => {
+            Ok((mut stream, addr)) => {
                 index += 1;
-                println!("[{}/{}] Adding client {}.", index, num, addr);
-                clients.push(addr);
+                let mut port = [0 as u8; 2];
+                let port = match stream.read(&mut port) {
+                    Ok(_) => match read_le_u16(&mut &port[..]) {
+                        Some(val) => val,
+                        None => {
+                            eprintln!("Failed to parse port number - skipping!");
+                            continue;
+                        }
+                    },
+                    Err(e) => {
+                        eprintln!(
+                            "Failed to receive port number from client - skipping! {}",
+                            e
+                        );
+                        continue;
+                    }
+                };
+                let client_addr = net::SocketAddr::new(addr.ip(), port);
+                println!("[{}/{}] Adding client {}.", index, num, client_addr);
+                clients.push(client_addr);
             }
-            Err(e) => eprint!("Incoming connection failed - skipping client! {}", e),
+            Err(e) => eprintln!("Incoming connection failed - skipping client! {}", e),
         }
     }
 

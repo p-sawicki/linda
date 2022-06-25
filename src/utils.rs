@@ -26,7 +26,7 @@ pub const IPV6_ADDR_LENGTH: usize = net::Ipv6Addr::LOCALHOST.octets().len();
 pub const PORT_LENGTH: usize = mem::size_of::<u16>();
 
 pub fn error(message: &str) -> ! {
-    eprint!("{}", message);
+    eprintln!("{}", message);
     process::exit(1)
 }
 
