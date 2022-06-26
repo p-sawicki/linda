@@ -1,9 +1,10 @@
-use linda::{message::*, tuple::Value, utils::*};
-use std::{
-    env,
-    io::Write,
-    net::{self},
+use linda::{
+    message::*,
+    parser::*,
+    tuple::{Tuple, Value},
+    utils::*,
 };
+use std::{env, io, net};
 
 fn main() {
     let server_socket = init();
@@ -13,6 +14,8 @@ fn main() {
         "Previous in ring: {}, next in ring: {}",
         prev_client, next_client
     );
+
+    client_loop(prev_client, next_client)
 }
 
 fn init() -> net::SocketAddr {
@@ -42,7 +45,11 @@ fn connect_to_server(server_socket: net::SocketAddr) -> (net::SocketAddr, net::S
 
     let client_socket = match net::TcpStream::connect(server_socket) {
         Ok(mut stream) => {
-            if let Err(e) = stream.write(&port.to_le_bytes()) {
+            let msg = Message::value(
+                Tuple::from_vec(vec![Value::int(port as i32)]),
+                server_socket,
+            );
+            if let Err(e) = msg.send(&mut stream) {
                 error(&format!("Failed to send to server! {}", e));
             }
             match stream.local_addr() {
@@ -66,8 +73,33 @@ fn connect_to_server(server_socket: net::SocketAddr) -> (net::SocketAddr, net::S
 }
 
 fn get_socket(stream: &mut net::TcpStream) -> net::SocketAddr {
-    match Message::<Value>::recv(stream) {
+    match Message::recv(stream) {
         Ok(msg) => msg.ip,
         Err(e) => error(&format!("Failed to obtain socket! {}", e)),
+    }
+}
+
+fn client_loop(prev: net::SocketAddr, next: net::SocketAddr) {
+    loop {
+        let command = match get_command() {
+            Ok(c) => c,
+            Err(e) => {
+                eprintln!("{}", e);
+                continue;
+            }
+        };
+
+        println!("Got command: {:?}", command);
+    }
+}
+
+fn get_command() -> Result<Command, &'static str> {
+    let mut input = String::new();
+    match io::stdin().read_line(&mut input) {
+        Ok(_) => {
+            let mut parser = Parser::new(&input);
+            parser.parse()
+        }
+        Err(_) => Err("Failed to read command - try again!"),
     }
 }

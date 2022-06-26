@@ -1,9 +1,5 @@
-use linda::{message::Message, tuple::*, utils::*};
-use std::{
-    env,
-    io::Read,
-    net::{self},
-};
+use linda::{message::*, tuple::*, utils::*};
+use std::{env, net};
 
 fn main() {
     let num_clients = init();
@@ -29,6 +25,22 @@ fn init() -> usize {
     }
 }
 
+fn get_port(stream: &mut net::TcpStream) -> Result<u16, String> {
+    let incorrect_msg_error = Err(String::from("No port in incoming message - skipping!"));
+    match Message::recv(stream) {
+        Ok(msg) => match msg.tuple {
+            MessageType::Value(tuple) => match tuple.first() {
+                Some(Value::Int(Some(val))) => Ok(*val as u16),
+                _ => incorrect_msg_error,
+            },
+            _ => incorrect_msg_error,
+        },
+        Err(e) => Err(String::from(format!(
+            "Failed to receive port - skipping: {e}!",
+        ))),
+    }
+}
+
 fn collect_clients(num: usize) -> Vec<net::SocketAddr> {
     let localhost = net::SocketAddrV4::new(net::Ipv4Addr::LOCALHOST, SERVER_PORT);
     let listener = match net::TcpListener::bind(localhost) {
@@ -48,20 +60,10 @@ fn collect_clients(num: usize) -> Vec<net::SocketAddr> {
         match listener.accept() {
             Ok((mut stream, addr)) => {
                 index += 1;
-                let mut port = [0 as u8; 2];
-                let port = match stream.read(&mut port) {
-                    Ok(_) => match read_le_u16(&mut &port[..]) {
-                        Some(val) => val,
-                        None => {
-                            eprintln!("Failed to parse port number - skipping!");
-                            continue;
-                        }
-                    },
+                let port = match get_port(&mut stream) {
+                    Ok(p) => p,
                     Err(e) => {
-                        eprintln!(
-                            "Failed to receive port number from client - skipping! {}",
-                            e
-                        );
+                        eprintln!("{e}");
                         continue;
                     }
                 };
@@ -100,13 +102,13 @@ fn send_connection_info(clients: &[net::SocketAddr]) {
             }
             Some(ref mut addr) => addr.next().unwrap(),
         };
-        let prev_msg = Message::<Value>::from_ip(prev_ip.clone());
+        let prev_msg = Message::from_ip(prev_ip.clone());
 
         let next_ip = match next.next() {
             Some(addr) => addr,
             None => clients.first().unwrap(),
         };
-        let next_msg = Message::<Value>::from_ip(next_ip.clone());
+        let next_msg = Message::from_ip(next_ip.clone());
 
         for msg in [prev_msg, next_msg] {
             if let Err(e) = msg.send(&mut stream) {

@@ -2,41 +2,58 @@ use std::{io, mem, net};
 
 use crate::{tuple::*, utils::*};
 
+const VALUE_ID: u8 = 0;
+const REQUEST_ID: u8 = 1;
+
 #[derive(Debug, PartialEq)]
-pub struct Message<T> {
-    pub tuple: Tuple<T>,
+pub enum MessageType {
+    Value(Tuple<Value>),
+    Request(Tuple<Request>),
+}
+
+#[derive(Debug, PartialEq)]
+pub struct Message {
+    pub tuple: MessageType,
     pub ip: net::SocketAddr,
 }
 
-impl<T> Message<T> {
-    pub fn new(tuple: Tuple<T>, ip: net::SocketAddr) -> Message<T> {
-        Message { tuple, ip }
-    }
-
-    pub fn from_ip(ip: net::SocketAddr) -> Message<T> {
+impl Message {
+    pub fn value(tuple: Tuple<Value>, ip: net::SocketAddr) -> Message {
         Message {
-            tuple: Tuple::new(),
+            tuple: MessageType::Value(tuple),
             ip,
         }
     }
-}
 
-impl<T: Serializable> Message<T> {
-    pub fn send(&self, stream: &mut net::TcpStream) -> Result<(), String> {
+    pub fn request(tuple: Tuple<Request>, ip: net::SocketAddr) -> Message {
+        Message {
+            tuple: MessageType::Request(tuple),
+            ip,
+        }
+    }
+
+    pub fn from_ip(ip: net::SocketAddr) -> Message {
+        Message {
+            tuple: MessageType::Value(Tuple::new()),
+            ip,
+        }
+    }
+
+    pub fn send<OutputStream: io::Write>(&self, stream: &mut OutputStream) -> Result<(), String> {
         let bytes = self.to_bytes();
         let size = bytes.len().to_le_bytes();
 
         for buf in [&size[..], &bytes[..]] {
-            if let Err(e) = io::Write::write(stream, buf) {
+            if let Err(e) = stream.write(buf) {
                 return Err(e.to_string());
             }
         }
         Ok(())
     }
 
-    pub fn recv(stream: &mut net::TcpStream) -> Result<Message<T>, String> {
+    pub fn recv<InputStream: io::Read>(stream: &mut InputStream) -> Result<Message, String> {
         let mut size = [0u8; mem::size_of::<usize>()];
-        if let Err(e) = io::Read::read(stream, &mut size[..]) {
+        if let Err(e) = stream.read(&mut size[..]) {
             return Err(e.to_string());
         }
 
@@ -47,7 +64,7 @@ impl<T: Serializable> Message<T> {
 
         let mut bytes = Vec::new();
         bytes.resize(size, 0);
-        if let Err(e) = io::Read::read(stream, &mut bytes[..]) {
+        if let Err(e) = stream.read(&mut bytes[..]) {
             return Err(e.to_string());
         }
 
@@ -58,19 +75,36 @@ impl<T: Serializable> Message<T> {
     }
 }
 
-impl<T: Serializable> Serializable for Message<T> {
+impl Serializable for Message {
     fn to_bytes(&self) -> Vec<u8> {
-        let mut bytes = self.tuple.to_bytes();
+        let mut bytes = Vec::new();
+        match &self.tuple {
+            MessageType::Value(tuple) => {
+                bytes.append(&mut VALUE_ID.to_le_bytes().to_vec());
+                bytes.append(&mut tuple.to_bytes());
+            }
+            MessageType::Request(tuple) => {
+                bytes.append(&mut REQUEST_ID.to_le_bytes().to_vec());
+                bytes.append(&mut tuple.to_bytes());
+            }
+        };
         bytes.append(&mut ip_to_bytes(&self.ip));
 
         bytes
     }
 
-    fn from_bytes(bytes: &mut &[u8]) -> Option<Message<T>> {
-        let tuple = Tuple::from_bytes(bytes)?;
-        let ip = bytes_to_ip(bytes)?;
-
-        Some(Message { tuple, ip })
+    fn from_bytes(bytes: &mut &[u8]) -> Option<Message> {
+        match read_le_u8(bytes) {
+            Some(VALUE_ID) => Some(Message::value(
+                Tuple::<Value>::from_bytes(bytes)?,
+                bytes_to_ip(bytes)?,
+            )),
+            Some(REQUEST_ID) => Some(Message::request(
+                Tuple::<Request>::from_bytes(bytes)?,
+                bytes_to_ip(bytes)?,
+            )),
+            _ => None,
+        }
     }
 }
 
@@ -117,9 +151,8 @@ fn bytes_to_ip(bytes: &mut &[u8]) -> Option<net::SocketAddr> {
 mod tests {
     use super::*;
     use crate::utils;
-    use std::fmt;
 
-    fn check_message<T: Serializable + fmt::Debug + PartialEq>(message: Message<T>) {
+    fn check_message(message: Message) {
         assert_eq!(
             message,
             Message::from_bytes(&mut &message.to_bytes()[..]).unwrap()
@@ -131,14 +164,14 @@ mod tests {
         let mut tuple = Tuple::new();
         tuple.push(Request::new(Value::int(420), ComparisonOperator::LE));
         check_message(Message {
-            tuple,
+            tuple: MessageType::Request(tuple),
             ip: net::SocketAddr::new(
                 net::IpAddr::V4(net::Ipv4Addr::LOCALHOST),
                 crate::utils::SERVER_PORT,
             ),
         });
 
-        check_message(Message::<Value>::from_ip(net::SocketAddr::new(
+        check_message(Message::from_ip(net::SocketAddr::new(
             net::IpAddr::V6(net::Ipv6Addr::LOCALHOST),
             utils::SERVER_PORT,
         )));

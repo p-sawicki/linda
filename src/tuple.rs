@@ -1,7 +1,4 @@
-use std::{
-    net::{self},
-    ops,
-};
+use std::ops;
 
 pub trait Serializable {
     fn to_bytes(&self) -> Vec<u8>;
@@ -10,7 +7,7 @@ pub trait Serializable {
         Self: Sized;
 }
 
-#[derive(PartialEq, Debug)]
+#[derive(PartialEq, Debug, PartialOrd)]
 pub enum Value {
     Int(Option<i32>),
     Float(Option<f64>),
@@ -156,6 +153,10 @@ impl<T> Tuple<T> {
     pub fn new() -> Tuple<T> {
         Tuple(Vec::new())
     }
+
+    pub fn from_vec(v: Vec<T>) -> Tuple<T> {
+        Tuple(v)
+    }
 }
 
 impl<T> ops::Deref for Tuple<T> {
@@ -197,6 +198,19 @@ impl Request {
     pub fn new(value: Value, op: ComparisonOperator) -> Request {
         Request { value, op }
     }
+
+    pub fn satisfies(&self, other: &Value) -> bool {
+        self.value.is_same_type(&other)
+            && match self.op {
+                ComparisonOperator::ANY => true,
+                ComparisonOperator::EQ => self.value == *other,
+                ComparisonOperator::GE => self.value >= *other,
+                ComparisonOperator::GT => self.value > *other,
+                ComparisonOperator::LE => self.value <= *other,
+                ComparisonOperator::LT => self.value < *other,
+                ComparisonOperator::NEQ => self.value != *other,
+            }
+    }
 }
 
 impl Serializable for Request {
@@ -217,7 +231,7 @@ impl Serializable for Request {
 
 #[cfg(test)]
 mod tests {
-    use std::{fmt, net};
+    use std::fmt;
 
     use super::*;
 

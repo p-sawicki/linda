@@ -3,7 +3,7 @@ use std::str::Chars;
 use crate::tuple::*;
 use crate::utils::*;
 
-struct Parser<'a> {
+pub struct Parser<'a> {
     curr: Option<char>,
     it: Chars<'a>,
 }
@@ -14,7 +14,7 @@ const ERROR_PARSING_TUPLE: &str = "Encountered an error while parsing tuple valu
 const NO_CLOSING_PARENTHESIS: &str = "Tuple needs to end with closing parenthesis (')')!";
 
 impl<'a> Parser<'a> {
-    fn new(s: &'a String) -> Parser<'a> {
+    pub fn new(s: &'a String) -> Parser<'a> {
         let it = s.chars();
         let curr = None;
         let mut parser = Parser { it, curr };
@@ -23,7 +23,7 @@ impl<'a> Parser<'a> {
         parser
     }
 
-    fn parse(&mut self) -> Result<Command, &'static str> {
+    pub fn parse(&mut self) -> Result<Command, &'static str> {
         match &self.word().to_lowercase()[..] {
             "out" => Ok(Command::Out(self.tuple()?)),
             "in" => Ok(Command::In(self.request()?, self.number() as Timeout)),
