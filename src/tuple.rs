@@ -7,7 +7,7 @@ pub trait Serializable {
         Self: Sized;
 }
 
-#[derive(PartialEq, Debug, PartialOrd)]
+#[derive(Clone, Debug, PartialEq, PartialOrd)]
 pub enum Value {
     Int(Option<i32>),
     Float(Option<f64>),
@@ -25,10 +25,10 @@ pub enum ComparisonOperator {
     ANY,
 }
 
-#[derive(PartialEq, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Tuple<T>(Vec<T>);
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Request {
     value: Value,
     op: ComparisonOperator,

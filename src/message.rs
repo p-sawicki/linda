@@ -5,13 +5,13 @@ use crate::{tuple::*, utils::*};
 const VALUE_ID: u8 = 0;
 const REQUEST_ID: u8 = 1;
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum MessageType {
     Value(Tuple<Value>),
     Request(Tuple<Request>),
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Message {
     pub tuple: MessageType,
     pub ip: net::SocketAddr,
@@ -149,6 +149,8 @@ fn bytes_to_ip(bytes: &mut &[u8]) -> Option<net::SocketAddr> {
 }
 
 mod tests {
+    use std::{net, thread, time};
+
     use super::*;
     use crate::utils;
 
@@ -161,19 +163,47 @@ mod tests {
 
     #[test]
     fn serialize_message() {
+        let ip: net::SocketAddr = "127.0.0.1:0".parse().unwrap();
+
         let mut tuple = Tuple::new();
         tuple.push(Request::new(Value::int(420), ComparisonOperator::LE));
         check_message(Message {
             tuple: MessageType::Request(tuple),
-            ip: net::SocketAddr::new(
-                net::IpAddr::V4(net::Ipv4Addr::LOCALHOST),
-                crate::utils::SERVER_PORT,
-            ),
+            ip: ip.clone(),
         });
 
-        check_message(Message::from_ip(net::SocketAddr::new(
-            net::IpAddr::V6(net::Ipv6Addr::LOCALHOST),
-            utils::SERVER_PORT,
-        )));
+        let mut tuple = Tuple::new();
+        tuple.push(Value::int(69));
+        tuple.push(Value::String(None));
+        check_message(Message {
+            tuple: MessageType::Value(tuple),
+            ip,
+        });
+
+        check_message(Message::from_ip("[::1]:0".parse().unwrap()));
+    }
+
+    #[test]
+    fn send_msg() {
+        let mut tuple = Tuple::new();
+        tuple.push(Request::new(Value::Float(None), ComparisonOperator::ANY));
+        tuple.push(Request::new(
+            Value::string(String::from("hello")),
+            ComparisonOperator::EQ,
+        ));
+        tuple.push(Request::new(Value::int(36), ComparisonOperator::GE));
+
+        let msg = Message::request(tuple, "[::1]:0".parse().unwrap());
+        let msg_clone = msg.clone();
+
+        thread::spawn(move || {
+            let listener = net::TcpListener::bind("127.0.0.1:1999").unwrap();
+            let (mut stream, _) = listener.accept().unwrap();
+            assert_eq!(Message::recv(&mut stream).unwrap(), msg);
+        });
+
+        thread::sleep(time::Duration::from_millis(100));
+        let mut stream = net::TcpStream::connect("127.0.0.1:1999").unwrap();
+        msg_clone.send(&mut stream).unwrap();
     }
 }
