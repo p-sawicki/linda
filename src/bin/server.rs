@@ -83,7 +83,6 @@ fn send_connection_info(clients: &[net::SocketAddr]) {
         return;
     }
 
-    let mut prev = None;
     let mut next = clients.iter();
     if let None = next.next() {
         next = clients.iter();
@@ -95,25 +94,12 @@ fn send_connection_info(clients: &[net::SocketAddr]) {
             Err(e) => error(&format!("Connection to client {} failed - {}!", addr, e)),
         };
 
-        let prev_ip = match prev {
-            None => {
-                prev = Some(clients.iter());
-                clients.last().unwrap()
-            }
-            Some(ref mut addr) => addr.next().unwrap(),
-        };
-        let prev_msg = Message::from_ip(prev_ip.clone());
-
         let next_ip = match next.next() {
             Some(addr) => addr,
             None => clients.first().unwrap(),
         };
-        let next_msg = Message::from_ip(next_ip.clone());
-
-        for msg in [prev_msg, next_msg] {
-            if let Err(e) = msg.send(&mut stream) {
-                error(&format!("Write to client {} failed - {}!", addr, e));
-            }
+        if let Err(e) = Message::from_ip(next_ip.clone()).send(&mut stream) {
+            error(&format!("Write to client {} failed - {}!", addr, e));
         }
     }
 }

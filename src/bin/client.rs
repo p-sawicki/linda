@@ -3,17 +3,13 @@ use linda::{
     parser::*,
     tuple::{Tuple, Value},
     utils::*,
+    *,
 };
-use std::{env, io, net};
+use std::{env, io, net, time};
 
 fn main() {
     let server_socket = init();
     let (prev_client, next_client) = connect_to_server(server_socket);
-
-    println!(
-        "Previous in ring: {}, next in ring: {}",
-        prev_client, next_client
-    );
 
     client_loop(prev_client, next_client)
 }
@@ -32,7 +28,7 @@ fn init() -> net::SocketAddr {
     }
 }
 
-fn connect_to_server(server_socket: net::SocketAddr) -> (net::SocketAddr, net::SocketAddr) {
+fn connect_to_server(server_socket: net::SocketAddr) -> (net::TcpListener, net::SocketAddr) {
     let listener = match net::TcpListener::bind("127.0.0.1:0") {
         Ok(list) => list,
         Err(e) => error(&format!("Failed to bind! {}", e)),
@@ -69,7 +65,7 @@ fn connect_to_server(server_socket: net::SocketAddr) -> (net::SocketAddr, net::S
         Err(e) => error(&format!("Failed to accept incoming connection! {}", e)),
     };
 
-    (get_socket(&mut stream), get_socket(&mut stream))
+    (listener, get_socket(&mut stream))
 }
 
 fn get_socket(stream: &mut net::TcpStream) -> net::SocketAddr {
@@ -79,7 +75,17 @@ fn get_socket(stream: &mut net::TcpStream) -> net::SocketAddr {
     }
 }
 
-fn client_loop(prev: net::SocketAddr, next: net::SocketAddr) {
+fn client_loop(local: net::TcpListener, next: net::SocketAddr) {
+    let next = match net::TcpStream::connect(next) {
+        Ok(str) => str,
+        Err(e) => error(&format!("Failed to connect to next in ring! {}", e)),
+    };
+    let (prev, _) = match local.accept() {
+        Ok(str) => str,
+        Err(e) => error(&format!("Failed to accept incoming stream! {e}")),
+    };
+
+    let linda = Linda::new(prev, next, local.local_addr().unwrap());
     loop {
         let command = match get_command() {
             Ok(c) => c,
@@ -90,6 +96,31 @@ fn client_loop(prev: net::SocketAddr, next: net::SocketAddr) {
         };
 
         println!("Got command: {:?}", command);
+
+        match match command {
+            Command::Exit => break,
+            Command::Help => {
+                println!("Under construction!");
+                break;
+            }
+            Command::In(tuple, timeout) => {
+                linda.input(tuple, time::Duration::from_secs(timeout as u64))
+            }
+            Command::Inp(tuple) => linda.inp(&tuple),
+            Command::Out(tuple) => {
+                if let Err(e) = linda.out(tuple) {
+                    eprintln!("{e}");
+                }
+                continue;
+            }
+            Command::Rd(tuple, timeout) => {
+                linda.read(tuple, time::Duration::from_secs(timeout as u64))
+            }
+            Command::Rdp(tuple) => linda.rdp(&tuple),
+        } {
+            Ok(tuple) => println!("Received: {tuple:?}"),
+            Err(e) => eprintln!("Error: {e}"),
+        };
     }
 }
 
