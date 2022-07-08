@@ -1,4 +1,4 @@
-use std::{io, mem, net};
+use std::{io, mem, net, sync};
 
 use crate::{tuple::*, utils::*};
 
@@ -15,6 +15,16 @@ pub enum MessageType {
 pub struct Message {
     pub tuple: MessageType,
     pub ip: net::SocketAddr,
+}
+
+#[derive(Debug)]
+pub enum LindaError {
+    MutexLockFailure(String),
+    IoFailure(io::Error),
+    MessageParseFailure,
+    ChannelSendFailure(sync::mpsc::SendError<Message>),
+    NoTuple,
+    Timeout,
 }
 
 impl Message {
@@ -39,38 +49,41 @@ impl Message {
         }
     }
 
-    pub fn send<OutputStream: io::Write>(&self, stream: &mut OutputStream) -> Result<(), String> {
+    pub fn send<OutputStream: io::Write>(
+        &self,
+        stream: &mut OutputStream,
+    ) -> Result<(), LindaError> {
         let bytes = self.to_bytes();
         let size = bytes.len().to_le_bytes();
 
         for buf in [&size[..], &bytes[..]] {
             if let Err(e) = stream.write(buf) {
-                return Err(e.to_string());
+                return Err(LindaError::IoFailure(e));
             }
         }
         Ok(())
     }
 
-    pub fn recv<InputStream: io::Read>(stream: &mut InputStream) -> Result<Message, String> {
+    pub fn recv<InputStream: io::Read>(stream: &mut InputStream) -> Result<Message, LindaError> {
         let mut size = [0u8; mem::size_of::<usize>()];
         if let Err(e) = stream.read(&mut size[..]) {
-            return Err(e.to_string());
+            return Err(LindaError::IoFailure(e));
         }
 
         let size = match read_le_usize(&mut &size[..]) {
             Some(val) => val,
-            None => return Err(String::from("Failed to receive message size!")),
+            None => return Err(LindaError::MessageParseFailure),
         };
 
         let mut bytes = Vec::new();
         bytes.resize(size, 0);
         if let Err(e) = stream.read(&mut bytes[..]) {
-            return Err(e.to_string());
+            return Err(LindaError::IoFailure(e));
         }
 
         match Message::from_bytes(&mut &bytes[..]) {
             Some(msg) => Ok(msg),
-            None => return Err(String::from("Failed to parse message!")),
+            None => return Err(LindaError::MessageParseFailure),
         }
     }
 }
@@ -148,11 +161,12 @@ fn bytes_to_ip(bytes: &mut &[u8]) -> Option<net::SocketAddr> {
     Some(net::SocketAddr::new(addr, port))
 }
 
+#[cfg(test)]
 mod tests {
-    use std::{net, thread, time};
+    use core::time;
+    use std::thread;
 
     use super::*;
-    use crate::utils;
 
     fn check_message(message: Message) {
         assert_eq!(

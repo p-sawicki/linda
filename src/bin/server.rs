@@ -3,7 +3,7 @@ use std::{env, net};
 
 fn main() {
     let num_clients = init();
-    println!("Starting server for {} clients", num_clients);
+    println!("Starting server for {num_clients} clients");
     let clients = collect_clients(num_clients);
     send_connection_info(&clients);
 }
@@ -16,12 +16,11 @@ fn init() -> usize {
             Ok(val) => val,
             Err(_) => {
                 error(&format!(
-                    "Expected positive integer as first argument, got: {}",
-                    val
+                    "Expected positive integer as first argument, got: {val}"
                 ));
             }
         },
-        None => error(&format!("Usage:\n{} $NUMBER_OF_CLIENTS", prog_name)),
+        None => error(&format!("Usage:\n{prog_name} $NUMBER_OF_CLIENTS")),
     }
 }
 
@@ -36,7 +35,7 @@ fn get_port(stream: &mut net::TcpStream) -> Result<u16, String> {
             _ => incorrect_msg_error,
         },
         Err(e) => Err(String::from(format!(
-            "Failed to receive port - skipping: {e}!",
+            "Failed to receive port - skipping: {e:?}!",
         ))),
     }
 }
@@ -45,10 +44,7 @@ fn collect_clients(num: usize) -> Vec<net::SocketAddr> {
     let localhost = net::SocketAddrV4::new(net::Ipv4Addr::LOCALHOST, SERVER_PORT);
     let listener = match net::TcpListener::bind(localhost) {
         Ok(val) => val,
-        Err(e) => error(&format!(
-            "Bind to local address {} failed! {}",
-            localhost, e
-        )),
+        Err(e) => error(&format!("Bind to local address {localhost} failed! {e}")),
     };
     println!("Listening at {}", listener.local_addr().unwrap());
 
@@ -68,10 +64,10 @@ fn collect_clients(num: usize) -> Vec<net::SocketAddr> {
                     }
                 };
                 let client_addr = net::SocketAddr::new(addr.ip(), port);
-                println!("[{}/{}] Adding client {}.", index, num, client_addr);
+                println!("[{index}/{num}] Adding client {client_addr}.");
                 clients.push(client_addr);
             }
-            Err(e) => eprintln!("Incoming connection failed - skipping client! {}", e),
+            Err(e) => eprintln!("Incoming connection failed - skipping client! {e}"),
         }
     }
 
@@ -91,7 +87,7 @@ fn send_connection_info(clients: &[net::SocketAddr]) {
     for addr in clients.iter() {
         let mut stream = match net::TcpStream::connect(addr) {
             Ok(val) => val,
-            Err(e) => error(&format!("Connection to client {} failed - {}!", addr, e)),
+            Err(e) => error(&format!("Connection to client {addr} failed - {e}!")),
         };
 
         let next_ip = match next.next() {
@@ -99,7 +95,7 @@ fn send_connection_info(clients: &[net::SocketAddr]) {
             None => clients.first().unwrap(),
         };
         if let Err(e) = Message::from_ip(next_ip.clone()).send(&mut stream) {
-            error(&format!("Write to client {} failed - {}!", addr, e));
+            error(&format!("Write to client {addr} failed - {e:?}!"));
         }
     }
 }

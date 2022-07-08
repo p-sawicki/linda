@@ -1,4 +1,4 @@
-use message::{Message, MessageType};
+use message::{LindaError, Message, MessageType};
 use std::{io, marker, net, sync, thread, time};
 
 use tuple::*;
@@ -15,12 +15,18 @@ type ValueRecv = sync::mpsc::Receiver<Tuple<Value>>;
 type ArcMutex<T> = sync::Arc<sync::Mutex<T>>;
 type LocalTuples = ArcMutex<Vec<Tuple<Value>>>;
 
-pub struct Linda<U> {
+pub struct Linda<Output> {
     rx: ValueRecv,
     tx: MessageSender,
-    output_stream: ArcMutex<U>,
+    output_stream: ArcMutex<Output>,
     local_tuples: LocalTuples,
     ip: net::SocketAddr,
+}
+
+fn print_debug(debug_msg: &str) {
+    if cfg!(debug_assertions) {
+        eprintln!("{debug_msg}");
+    }
 }
 
 fn satisfies(request: &Tuple<Request>, value: &Tuple<Value>) -> bool {
@@ -36,18 +42,18 @@ fn satisfies(request: &Tuple<Request>, value: &Tuple<Value>) -> bool {
     }
 }
 
-fn send<T: io::Write>(output: &ArcMutex<T>, msg: Message) -> Result<(), String> {
-    println!("Sending: {msg:?}");
+fn send<Output: io::Write>(output: &ArcMutex<Output>, msg: Message) -> Result<(), LindaError> {
+    print_debug(&format!("Sending: {msg:?}"));
     match output.lock() {
         Ok(mut guard) => msg.send(&mut *guard),
-        Err(e) => Err(format!("Failed to open output! {e}")),
+        Err(e) => Err(LindaError::MutexLockFailure(e.to_string())),
     }
 }
 
-fn add_tuple(local_tuples: &LocalTuples, tuple: Tuple<Value>) {
+fn add_tuple(local_tuples: &LocalTuples, tuple: Tuple<Value>) -> Result<(), LindaError> {
     match local_tuples.lock() {
-        Ok(mut guard) => guard.push(tuple),
-        Err(e) => eprintln!("{e}"),
+        Ok(mut guard) => Ok(guard.push(tuple)),
+        Err(e) => Err(LindaError::MutexLockFailure(e.to_string())),
     }
 }
 
@@ -68,15 +74,17 @@ fn find_tuple(local_tuples: &LocalTuples, request: &Tuple<Request>) -> Option<Tu
             }
         }
         Err(e) => {
-            eprintln!("{e}");
+            if cfg!(debug_assertions) {
+                eprintln!("{e}");
+            }
             None
         }
     }
 }
 
-fn worker<T: io::Read, U: io::Write>(
-    mut input: T,
-    output: ArcMutex<U>,
+fn worker<Input: io::Read, Output: io::Write>(
+    mut input: Input,
+    output: ArcMutex<Output>,
     local_tuples: LocalTuples,
     tx: ValueSender,
     rx: MessageRecv,
@@ -87,11 +95,12 @@ fn worker<T: io::Read, U: io::Write>(
         let msg = match Message::recv(&mut input) {
             Ok(msg) => msg,
             Err(e) => {
-                eprintln!("{e}");
+                eprintln!("Failed to receive message in worker thread - aborting!");
+                print_debug(&format!("ERROR: {e:?}"));
                 break;
             }
         };
-        println!("Received: {msg:?}");
+        print_debug(&format!("Received: {msg:?}"));
         match rx.try_recv() {
             Ok(msg) => match msg.tuple {
                 MessageType::Request(req) => request = Some(req),
@@ -103,30 +112,34 @@ fn worker<T: io::Read, U: io::Write>(
             }
             Err(sync::mpsc::TryRecvError::Empty) => (),
         }
-        println!("Request: {request:?}");
+        print_debug(&format!("Request: {request:?}"));
         match msg.tuple {
-            MessageType::Value(val) if msg.ip == ip => add_tuple(&local_tuples, val),
+            MessageType::Value(val) if msg.ip == ip => {
+                if let Err(e) = add_tuple(&local_tuples, val) {
+                    print_debug(&format!("ERROR: {e:?}"));
+                }
+            }
             MessageType::Value(val) if matches!(request, Some(ref req) if satisfies(&req, &val)) => {
                 if let Err(e) = tx.send(val) {
-                    eprintln!("{e}");
+                    print_debug(&format!("ERROR: {e}"));
                 }
                 request = None;
             }
             MessageType::Value(_) => {
                 if let Err(e) = send(&output, msg) {
-                    eprintln!("{e}");
+                    print_debug(&format!("ERROR: {e:?}"));
                 }
             }
             MessageType::Request(_) if msg.ip == ip => (),
             MessageType::Request(ref request) => match find_tuple(&local_tuples, request) {
                 Some(value) => {
                     if let Err(e) = send(&output, Message::value(value, ip)) {
-                        eprintln!("{e}");
+                        print_debug(&format!("ERROR: {e:?}"));
                     }
                 }
                 None => {
                     if let Err(e) = send(&output, msg) {
-                        eprintln!("{e}");
+                        print_debug(&format!("ERROR: {e:?}"));
                     }
                 }
             },
@@ -134,12 +147,12 @@ fn worker<T: io::Read, U: io::Write>(
     }
 }
 
-impl<U: 'static + io::Write + marker::Send> Linda<U> {
-    pub fn new<T: 'static + io::Read + marker::Send>(
-        input_stream: T,
-        output_stream: U,
+impl<Output: 'static + io::Write + marker::Send> Linda<Output> {
+    pub fn new<Input: 'static + io::Read + marker::Send>(
+        input_stream: Input,
+        output_stream: Output,
         ip: net::SocketAddr,
-    ) -> Linda<U> {
+    ) -> Linda<Output> {
         let (tx_to_worker, rx_to_worker) = sync::mpsc::channel();
         let (tx_from_worker, rx_from_worker) = sync::mpsc::channel();
 
@@ -168,7 +181,7 @@ impl<U: 'static + io::Write + marker::Send> Linda<U> {
         }
     }
 
-    pub fn out(&self, tuple: Tuple<Value>) -> Result<(), String> {
+    pub fn out(&self, tuple: Tuple<Value>) -> Result<(), LindaError> {
         let msg = Message::value(tuple, self.ip.clone());
         send(&self.output_stream, msg)
     }
@@ -177,21 +190,21 @@ impl<U: 'static + io::Write + marker::Send> Linda<U> {
         &self,
         tuple: Tuple<Request>,
         timeout: time::Duration,
-    ) -> Result<Tuple<Value>, String> {
+    ) -> Result<Tuple<Value>, LindaError> {
         if let Ok(tuple) = self.inp(&tuple) {
             return Ok(tuple);
         }
 
         let msg = Message::request(tuple, self.ip.clone());
         if let Err(e) = self.tx.send(msg.clone()) {
-            return Err(e.to_string());
+            return Err(LindaError::ChannelSendFailure(e));
         }
 
         send(&self.output_stream, msg)?;
 
         match self.rx.recv_timeout(timeout) {
             Ok(tuple) => Ok(tuple),
-            Err(e) => Err(e.to_string()),
+            Err(_) => Err(LindaError::Timeout),
         }
     }
 
@@ -199,23 +212,24 @@ impl<U: 'static + io::Write + marker::Send> Linda<U> {
         &self,
         tuple: Tuple<Request>,
         timeout: time::Duration,
-    ) -> Result<Tuple<Value>, String> {
+    ) -> Result<Tuple<Value>, LindaError> {
         let tuple = self.input(tuple, timeout)?;
-        add_tuple(&self.local_tuples, tuple.clone());
+        add_tuple(&self.local_tuples, tuple.clone())?;
 
         Ok(tuple)
     }
 
-    pub fn inp(&self, tuple: &Tuple<Request>) -> Result<Tuple<Value>, String> {
+    pub fn inp(&self, tuple: &Tuple<Request>) -> Result<Tuple<Value>, LindaError> {
         match find_tuple(&self.local_tuples, &tuple) {
             Some(tuple) => Ok(tuple),
-            None => Err(String::from("No tuple")),
+            None => Err(LindaError::NoTuple),
         }
     }
 
-    pub fn rdp(&self, tuple: &Tuple<Request>) -> Result<Tuple<Value>, String> {
+    pub fn rdp(&self, tuple: &Tuple<Request>) -> Result<Tuple<Value>, LindaError> {
         let tuple = self.inp(tuple)?;
-        add_tuple(&self.local_tuples, tuple.clone());
+        add_tuple(&self.local_tuples, tuple.clone())?;
+
         Ok(tuple)
     }
 }
